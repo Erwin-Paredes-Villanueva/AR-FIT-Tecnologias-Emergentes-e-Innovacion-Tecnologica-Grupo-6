@@ -1,0 +1,36 @@
+.env
+*.local.json
+node_modules/
+contracts/build/
+.DS_Store
+.db-password
+app/test/live_products.json
+app/android/camerakit.properties
+
+# Supabase CLI (datos locales del proyecto enlazado)
+supabase/.temp/
+
+# Configuración local de herramientas
+/.mcp.json
+.claude/
+.codex/
+.cursor/
+.vscode/
+
+# Documentos y binarios (no son código)
+*.docx
+*.pptx
+*.apk
+*.skill
+~$*
+GUIA-DEL-CODIGO.md
+
+# Lens Studio: archivos generados o locales
+lenses/*/Cache/
+lenses/*/Support/
+lenses/*/Workspaces/
+lenses/*/PluginsUserPreferences/
+lenses/*/.virtual-scene.json
+lenses/*/AGENTS.md
+lenses/*/CLAUDE.md
+lenses/*/jsconfig.json

@@ -1,0 +1,4 @@
+# Snap Camera Kit (probador 3D). Copia este archivo como camerakit.properties (fuera de git)
+# y completa los valores desde https://my-lenses.snapchat.com → Camera Kit.
+cameraKitApiToken=
+cameraKitLensGroupId=

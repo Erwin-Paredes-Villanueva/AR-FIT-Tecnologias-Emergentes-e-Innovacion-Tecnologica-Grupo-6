@@ -1,0 +1,16 @@
+{
+  "name": "arfit-contracts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "node scripts/compile.mjs",
+    "wallet": "node scripts/wallet.mjs",
+    "balance": "node scripts/balance.mjs",
+    "deploy": "node scripts/compile.mjs && node scripts/deploy.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.4",
+    "solc": "0.8.28"
+  }
+}

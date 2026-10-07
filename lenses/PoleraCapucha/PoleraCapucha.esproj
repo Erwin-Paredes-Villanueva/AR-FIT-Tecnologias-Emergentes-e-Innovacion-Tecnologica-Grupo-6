@@ -1,0 +1,55 @@
+studioVersion:
+  major: 5
+  minor: 22
+  patch: 1
+  build: 26062503
+  type: Public
+coreVersion: 364
+clientVersion: 13.94
+updateCheckpoint: 101
+sceneId: 0a1ccb1a-fe88-4fbb-9883-e3af3c75fd99
+metaInfo:
+  hints:
+    []
+  tags:
+    []
+  lensName: ARFIT Polera Gris
+  lensDescriptors:
+    - AI_MUTATED
+    - GEN_AI_ICON
+  lensApplicableContext:
+    - live_camera
+    - reply_camera
+    - video_chat
+  lensApplicability:
+    - Front
+    - Back
+  lensClientCompatibilities:
+    - Mobile
+    - CameraKit
+  platformBundlesEnabled: false
+  iconHash: 71a2bd28a827fc6d71d4471269b8449d
+  videoPreviewHash: d2278c0b7638b90337c60bdf8d3fa15f
+  fromTemplateName: Default
+  fromTemplateUrl: Lens Studio 5.22.1.26062503
+  activationCamera: Front
+  sourceMapEnabled: false
+  shaderCacheInvalidationEnabled: false
+  usingMinClientVersions: false
+  androidMinClientVersion:
+    major: 0
+    minor: 0
+    patch: 0
+    build: 0
+  iOSMinClientVersion:
+    major: 0
+    minor: 0
+    patch: 0
+    build: 0
+  documentId: c2abbbc2-de51-491c-ac15-56abaebdc50c
+  originalDocumentId: f3d524c5-ac07-44a7-b03a-e07d591396ec
+  packageId: ""
+  packageVersion: ""
+  spkPrivilegeLevel: Generic
+  gluboEnabled: false
+targetPlatform: Snapchat
