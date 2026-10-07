@@ -1,7 +1,8 @@
 # AR-FIT · Marketplace phygital de moda
 
-**Curso:** Tecnologías Emergentes e Innovación Tecnológica · **Grupo 6**
-**Integrantes:** Erwin Paredes Villanueva · Alberto Anampa Antayhua
+- **Curso:** Tecnologías Emergentes e Innovación Tecnológica · **Grupo 6**
+- **Docente:** Hernan Oswaldo Villafuerte Barreto
+- **Integrantes:** Erwin Paredes Villanueva · Alberto Anampa Antayhua
 
 Aplicación Android (Flutter) de un marketplace de moda que integra tres tecnologías emergentes:
 
