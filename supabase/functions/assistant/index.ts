@@ -45,12 +45,12 @@ CATÁLOGO (ordenado por afinidad con el usuario): ${JSON.stringify(catalog)}`;
 
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) throw new HttpError(500, 'GEMINI_API_KEY no configurada');
-  const model = Deno.env.get('GEMINI_MODEL') ?? 'gemini-3.8-flash';
-
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({
+  // Modelo principal y respaldos: si uno está saturado (429/503) o no existe (404), se prueba el siguiente
+  const models = [
+    ...(Deno.env.get('GEMINI_MODEL') ?? 'gemini-3.8-flash').split(','),
+    'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-flash-lite-latest',
+  ].map((m) => m.trim()).filter((m, i, all) => m && all.indexOf(m) === i);
+  const payload = JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: messages.slice(-12).map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
       generationConfig: {
@@ -65,12 +65,30 @@ CATÁLOGO (ordenado por afinidad con el usuario): ${JSON.stringify(catalog)}`;
           required: ['reply', 'product_ids'],
         },
       },
-    }),
-  });
-  if (!res.ok) {
-    const detail = await res.text();
-    console.error('Gemini', res.status, detail);
-    throw new HttpError(502, res.status === 429 ? 'La IA está saturada, intenta en un minuto' : 'Error consultando la IA');
+    });
+
+  let res: Response | null = null;
+  for (const model of models) {
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: payload,
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (e) {
+      console.error('Gemini', model, 'sin respuesta', e);
+      res = null;
+      continue;
+    }
+    if (res.ok) break;
+    console.error('Gemini', model, res.status, await res.text());
+    if (![404, 429, 500, 503].includes(res.status)) break;
+  }
+  if (!res?.ok) {
+    throw new HttpError(502, res?.status === 429 || res?.status === 503
+      ? 'La IA está saturada, intenta en un minuto'
+      : 'Error consultando la IA');
   }
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? '{}';

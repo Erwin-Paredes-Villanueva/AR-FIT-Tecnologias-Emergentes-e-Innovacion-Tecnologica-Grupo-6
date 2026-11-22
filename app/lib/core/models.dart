@@ -91,6 +91,7 @@ class Product {
   final String? tryonLensId; // lente de Snap Camera Kit para el probador 3D
   final String origin;
   final String materials;
+  final Map<String, String> gtins; // código de barras EAN-13 por talla
   final String? chainProductId;
   final String? chainTx;
   final String? dataHash;
@@ -124,6 +125,7 @@ class Product {
         tryonLensId = (j['tryon_lens_id'] as String?)?.trim().isEmpty ?? true ? null : (j['tryon_lens_id'] as String).trim(),
         origin = j['origin'] ?? '',
         materials = j['materials'] ?? '',
+        gtins = Map<String, dynamic>.from(j['gtins'] ?? const {}).map((k, v) => MapEntry(k, v.toString())),
         chainProductId = j['chain_product_id'],
         chainTx = j['chain_tx'],
         dataHash = j['data_hash'],
@@ -187,6 +189,26 @@ class ShipmentEvent {
         actorRole = j['actor_role'],
         txHash = j['tx_hash'],
         blockNumber = j['block_number'],
+        createdAt = DateTime.parse(j['created_at']);
+}
+
+/// Unidad física con su etiqueta anti-fraude (QR firmado + código de barras).
+class ProductUnit {
+  final String id, serial, size, gtin, qrPayload;
+  final String? issueTx, ownerId, claimTx;
+  final DateTime? claimedAt;
+  final DateTime createdAt;
+
+  ProductUnit.fromJson(Map<String, dynamic> j)
+      : id = j['id'],
+        serial = j['serial'],
+        size = j['size'],
+        gtin = j['gtin'],
+        qrPayload = j['qr_payload'],
+        issueTx = j['issue_tx'],
+        ownerId = j['owner_id'],
+        claimTx = j['claim_tx'],
+        claimedAt = j['claimed_at'] == null ? null : DateTime.parse(j['claimed_at']),
         createdAt = DateTime.parse(j['created_at']);
 }
 

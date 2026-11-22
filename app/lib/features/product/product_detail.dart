@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/api.dart';
 import '../../core/app_state.dart';
@@ -8,10 +7,12 @@ import '../../core/labels.dart';
 import '../../core/models.dart';
 import '../../core/sizing.dart';
 import '../../core/snap_tryon.dart';
+import '../tryon/snap_tryon_screen.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
 import '../cart/cart_screen.dart';
 import '../tryon/tryon_screen.dart';
+import '../supplier/labels_screen.dart';
 import '../verify/authenticity_card.dart';
 
 class ProductDetail extends StatefulWidget {
@@ -60,14 +61,11 @@ class _ProductDetailState extends State<ProductDetail> {
 
   /// Probador 3D (Snap): prenda con volumen y simulación de tela en cámara en vivo.
   Future<void> _openTryOn3D() async {
-    Api.track(p.id, 'tryon');
-    final res = await SnapTryOn.launch(p.tryonLensId!);
-    if (!mounted) return;
-    if (res.status == 'failure') {
-      showError(context, 'No se pudo abrir el probador 3D: ${res.error ?? 'error desconocido'}');
-    } else if (res.status == 'image' || res.status == 'video') {
-      showInfo(context, res.status == 'image' ? 'Foto del probador 3D guardada' : 'Video del probador 3D guardado');
-    }
+    final chosen = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => SnapTryOnScreen(product: p, initialSize: _size)),
+    );
+    if (chosen != null && mounted) setState(() => _size = chosen);
   }
 
   Future<void> _openTryOn() async {
@@ -82,6 +80,8 @@ class _ProductDetailState extends State<ProductDetail> {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final isBuyer = state.profile!.isBuyer;
+    final has3D = _snapReady && p.tryonLensId != null;
+    final has2D = p.tryonRig != null;
     final body = state.body;
     final rec = recommendSize(body, state.profile!.size, p);
     final fav = state.favorites.contains(p.id);
@@ -177,6 +177,19 @@ class _ProductDetailState extends State<ProductDetail> {
               ),
           ]),
         ),
+        if (isBuyer && !has3D && !has2D)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.muted.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(14)),
+              child: const Row(children: [
+                Icon(Icons.image_outlined, color: AppColors.muted),
+                SizedBox(width: 10),
+                Expanded(child: Text('Esta prenda aún no tiene probador virtual: por ahora solo puedes verla en fotos.')),
+              ]),
+            ),
+          ),
         const SectionTitle('Autenticidad y procedencia'),
         Padding(padding: const EdgeInsets.symmetric(horizontal: 20), child: AuthenticityCard(product: p)),
         const SectionTitle('Descripción'),
@@ -194,15 +207,19 @@ class _ProductDetailState extends State<ProductDetail> {
           const SectionTitle('Tabla de medidas (cm)'),
           Padding(padding: const EdgeInsets.symmetric(horizontal: 20), child: _SizeTable(product: p)),
         ],
-        if (!isBuyer) ...[
-          const SectionTitle('Etiqueta QR para la prenda física', subtitle: 'Imprímela y cósela a la prenda: cualquiera puede escanearla para verificarla'),
-          Center(
-            child: Container(
-              color: Colors.white,
-              padding: const EdgeInsets.all(12),
-              child: QrImageView(data: 'arfit://product/${p.id}', size: 180),
+        if (state.profile!.isAdmin || state.profile!.id == p.supplierId) ...[
+          const SectionTitle('Etiquetas anti-fraude',
+              subtitle: 'Un QR único y firmado por cada prenda física, más el código de barras de su talla'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.chain),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LabelsScreen(product: p))),
+              icon: const Icon(Icons.qr_code_2),
+              label: const Text('Emitir e imprimir etiquetas'),
             ),
           ),
+          const SizedBox(height: 20),
         ],
       ]),
       bottomNavigationBar: isBuyer
@@ -210,7 +227,9 @@ class _ProductDetailState extends State<ProductDetail> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
                 child: Row(children: [
-                  if (_snapReady) ...[
+                  // Solo se ofrece el probador que la prenda tiene listo:
+                  // 3D = lente de Snap · 2D = rig de la prenda para la malla deformable
+                  if (has3D) ...[
                     Expanded(
                       child: FilledButton.icon(
                         style: FilledButton.styleFrom(backgroundColor: AppColors.ar),
@@ -219,14 +238,17 @@ class _ProductDetailState extends State<ProductDetail> {
                         label: const Text('Probar en 3D'),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    IconButton.outlined(
-                      tooltip: 'Probador rápido',
-                      style: IconButton.styleFrom(minimumSize: const Size(52, 52)),
-                      onPressed: _openTryOn,
-                      icon: const Icon(Icons.accessibility_new),
-                    ),
-                  ] else
+                    if (has2D) ...[
+                      const SizedBox(width: 8),
+                      IconButton.outlined(
+                        tooltip: 'Probador rápido',
+                        style: IconButton.styleFrom(minimumSize: const Size(52, 52)),
+                        onPressed: _openTryOn,
+                        icon: const Icon(Icons.accessibility_new),
+                      ),
+                    ],
+                    const SizedBox(width: 10),
+                  ] else if (has2D) ...[
                     Expanded(
                       child: FilledButton.icon(
                         style: FilledButton.styleFrom(backgroundColor: AppColors.ar),
@@ -235,7 +257,8 @@ class _ProductDetailState extends State<ProductDetail> {
                         label: const Text('Probar en RA'),
                       ),
                     ),
-                  const SizedBox(width: 10),
+                    const SizedBox(width: 10),
+                  ],
                   Expanded(child: BusyButton(label: 'Al carrito', icon: Icons.add_shopping_cart, onPressed: p.sizesInStock.isEmpty ? null : _addToCart)),
                 ]),
               ),

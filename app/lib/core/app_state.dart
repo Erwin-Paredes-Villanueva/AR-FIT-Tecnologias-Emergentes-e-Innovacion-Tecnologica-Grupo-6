@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'api.dart';
@@ -14,7 +15,7 @@ class AppState extends ChangeNotifier {
       if (data.event == AuthChangeEvent.signedIn || data.event == AuthChangeEvent.initialSession) {
         if (data.session != null) loadProfile();
       } else if (data.event == AuthChangeEvent.signedOut) {
-        _clear();
+        _afterSignOut();
       }
     });
   }
@@ -110,9 +111,34 @@ class AppState extends ChangeNotifier {
     await Api.setFavorite(productId, fav);
   }
 
-  Future<void> signOut() => sb.auth.signOut();
+  /// Cierra la sesión. Primero se cambia a la pantalla de inicio de sesión y
+  /// recién después se borran los datos, para que ninguna pantalla que siga
+  /// visible intente leer un perfil vacío (eso dejaba la pantalla en blanco).
+  Future<void> signOut() async {
+    _signingOut = true;
+    notifyListeners();
+    try {
+      await sb.auth.signOut();
+    } catch (e) {
+      debugPrint('signOut: $e'); // sin conexión: la sesión local igual se descarta
+    }
+    _afterSignOut();
+  }
+
+  bool _signingOut = false;
+
+  /// true mientras se cierra la sesión (la app ya muestra el inicio de sesión).
+  bool get signingOut => _signingOut;
+
+  void _afterSignOut() {
+    _signingOut = true;
+    notifyListeners(); // RootGate pasa a LoginScreen con el perfil aún cargado
+    SchedulerBinding.instance.addPostFrameCallback((_) => _clear());
+    SchedulerBinding.instance.scheduleFrame();
+  }
 
   void _clear() {
+    _signingOut = false;
     profile = null;
     favorites = {};
     cartCount = 0;

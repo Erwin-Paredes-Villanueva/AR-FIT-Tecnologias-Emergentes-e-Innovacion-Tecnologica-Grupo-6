@@ -5,10 +5,10 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
@@ -16,14 +16,15 @@ import 'package:provider/provider.dart';
 
 import '../../core/api.dart';
 import '../../core/app_state.dart';
-import '../../core/labels.dart';
 import '../../core/models.dart';
 import '../../core/sizing.dart';
 import '../../theme.dart';
 import '../../widgets/common.dart';
+import 'capture_preview.dart';
 import 'garment_rig.dart';
 import 'one_euro.dart';
 import 'rig_fitter.dart';
+import 'tryon_panel.dart';
 
 /// Solo para verificación en emulador: `--dart-define=ARFIT_TEST_IMAGE=/ruta/foto.png`
 /// analiza esa foto en lugar de la cámara. En el APK normal está vacío.
@@ -61,6 +62,13 @@ class _TryOnScreenState extends State<TryOnScreen> with WidgetsBindingObserver {
   String? _hint;
   bool _showSkeleton = false;
 
+  // captura de foto: el próximo cuadro de la cámara se copia para componer la imagen
+  Completer<_RawFrame>? _frameRequest;
+  bool _capturing = false;
+  bool _flash = false;
+  // temporizador de la foto (compartido con el probador 3D)
+  final _timer = PhotoTimer();
+
   // ajuste manual del usuario (pellizcar / arrastrar)
   double _userScale = 1;
   Offset _userOffset = Offset.zero;
@@ -71,6 +79,7 @@ class _TryOnScreenState extends State<TryOnScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _timer.addListener(() => mounted ? setState(() {}) : null);
     WidgetsBinding.instance.addObserver(this);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     final state = context.read<AppState>();
@@ -257,7 +266,10 @@ class _TryOnScreenState extends State<TryOnScreen> with WidgetsBindingObserver {
     _controller = controller;
     try {
       await controller.initialize();
-      await controller.startImageStream((img) => _process(img, camera));
+      await controller.startImageStream((img) {
+        _grabFrame(img);
+        _process(img, camera);
+      });
     } on CameraException catch (e) {
       if (mounted) {
         setState(() => _error = e.code.contains('Denied')
@@ -327,6 +339,96 @@ class _TryOnScreenState extends State<TryOnScreen> with WidgetsBindingObserver {
         bytesPerRow: plane.bytesPerRow,
       ),
     );
+  }
+
+  // ------------------------------------------------------------ captura
+  void _grabFrame(CameraImage image) {
+    final req = _frameRequest;
+    if (req == null || req.isCompleted || image.planes.isEmpty) return;
+    final plane = image.planes.first;
+    req.complete(_RawFrame(
+      Uint8List.fromList(plane.bytes),
+      image.width,
+      image.height,
+      plane.bytesPerRow,
+      _rotation.rawValue,
+    ));
+  }
+
+  /// Foto = cuadro de la cámara (enderezado igual que los puntos de ML Kit)
+  /// + la prenda dibujada encima con la misma malla que se ve en pantalla.
+  Future<void> _capture() async {
+    if (_capturing) return;
+    final outcome = _fit();
+    final garment = outcome != null && outcome.back && _backImage != null ? _backImage : _front;
+    if (outcome?.mesh == null || garment == null) {
+      showInfo(context, 'Colócate frente a la cámara hasta que la prenda aparezca sobre ti');
+      return;
+    }
+    setState(() {
+      _capturing = true;
+      _flash = true;
+    });
+    Future.delayed(const Duration(milliseconds: 160), () => mounted ? setState(() => _flash = false) : null);
+    try {
+      ui.Image base;
+      Size canvasSize;
+      if (_testImage != null) {
+        base = _testImage!;
+        canvasSize = Size(base.width.toDouble(), base.height.toDouble());
+      } else {
+        final preview = _controller?.value.previewSize;
+        if (preview == null || !Platform.isAndroid) throw Exception('Cámara no disponible');
+        canvasSize = Size(preview.height, preview.width);
+        _frameRequest = Completer<_RawFrame>();
+        final raw = await _frameRequest!.future.timeout(const Duration(seconds: 2));
+        final mirror = _lens == CameraLensDirection.front;
+        final rgba = await compute(_nv21ToUprightRgba, (frame: raw, mirror: mirror));
+        base = await _decodeRgba(rgba.pixels, rgba.width, rgba.height);
+      }
+      final bytes = await _compose(base, canvasSize, outcome!.mesh!, garment);
+      if (!mounted) return;
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => CapturePreview.bytes(bytes, title: p.name)));
+    } catch (e) {
+      if (mounted) showError(context, 'No se pudo tomar la foto: $e');
+    } finally {
+      _frameRequest = null;
+      if (mounted) setState(() => _capturing = false);
+    }
+  }
+
+  static Future<ui.Image> _decodeRgba(Uint8List px, int w, int h) {
+    final c = Completer<ui.Image>();
+    ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, c.complete);
+    return c.future;
+  }
+
+  Future<Uint8List> _compose(ui.Image base, Size canvasSize, GarmentMesh mesh, ui.Image garment) async {
+    // la cámara entrega ~720×480: se dibuja al doble para que la prenda salga nítida
+    final k = _testImage != null ? 1.0 : 2.0;
+    final out = Size(canvasSize.width * k, canvasSize.height * k);
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Offset.zero & out);
+    canvas.scale(k);
+    canvas.drawImageRect(
+      base,
+      Rect.fromLTWH(0, 0, base.width.toDouble(), base.height.toDouble()),
+      Offset.zero & canvasSize,
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+    _GarmentPainter(image: garment, mesh: mesh, userScale: _userScale, userOffset: _userOffset).paint(canvas, canvasSize);
+    // sello con la prenda y la talla
+    final label = TextPainter(
+      text: TextSpan(
+        text: 'AR-FIT · ${p.name}${_size != null ? ' · talla $_size' : ''}',
+        style: TextStyle(color: Colors.white, fontSize: canvasSize.width * 0.035, fontWeight: FontWeight.w700, shadows: const [Shadow(blurRadius: 6)]),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: canvasSize.width * 0.92);
+    label.paint(canvas, Offset(canvasSize.width * 0.04, canvasSize.height - label.height - canvasSize.width * 0.04));
+    final img = await recorder.endRecording().toImage(out.width.round(), out.height.round());
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return data!.buffer.asUint8List();
   }
 
   Future<void> _process(CameraImage image, CameraDescription camera) async {
@@ -412,6 +514,7 @@ class _TryOnScreenState extends State<TryOnScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _timer.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _stopCamera();
     _detector.close();
@@ -474,6 +577,8 @@ class _TryOnScreenState extends State<TryOnScreen> with WidgetsBindingObserver {
             ),
           ),
         Positioned(left: 0, right: 0, bottom: 0, child: _bottomPanel()),
+        CountdownOverlay(timer: _timer),
+        FlashOverlay(visible: _flash),
       ]),
     );
   }
@@ -545,128 +650,35 @@ class _TryOnScreenState extends State<TryOnScreen> with WidgetsBindingObserver {
     });
   }
 
-  Widget _topBar() {
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Row(children: [
-            _roundButton(Icons.close, () => Navigator.pop(context)),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(p.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, shadows: [Shadow(blurRadius: 6)])),
-                const Text('Probador virtual · RA',
-                    style: TextStyle(color: Colors.white70, fontSize: 12, shadows: [Shadow(blurRadius: 6)])),
-              ]),
-            ),
-            _roundButton(_showSkeleton ? Icons.person : Icons.person_outline, () => setState(() => _showSkeleton = !_showSkeleton),
-                tooltip: 'Ver puntos detectados por IA'),
-            const SizedBox(width: 8),
-            _roundButton(Icons.cameraswitch_outlined, _switchCamera, tooltip: 'Cambiar cámara'),
-          ]),
-        ),
-      ),
-    );
-  }
-
-  Widget _roundButton(IconData icon, VoidCallback onTap, {String? tooltip}) => Material(
-        color: Colors.black.withValues(alpha: 0.45),
-        shape: const CircleBorder(),
-        child: IconButton(tooltip: tooltip, icon: Icon(icon, color: Colors.white), onPressed: onTap),
+  Widget _topBar() => TryOnTopBar(
+        title: p.name,
+        subtitle: 'Probador virtual · RA',
+        actions: [
+          tryOnRoundButton(_showSkeleton ? Icons.person : Icons.person_outline, () => setState(() => _showSkeleton = !_showSkeleton),
+              tooltip: 'Ver puntos detectados por IA'),
+          tryOnRoundButton(Icons.cameraswitch_outlined, _switchCamera, tooltip: 'Cambiar cámara'),
+        ],
       );
+
+
 
   Widget _bottomPanel() {
     final body = _body!;
-    final rec = recommendSize(context.read<AppState>().body, context.read<AppState>().profile?.size, p);
-    final measures = _size == null ? null : p.sizeChart[_size];
-    final details = measures == null ? <ZoneFit>[] : fitDetails(body, measures, p.tryonType);
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.transparent, Colors.black.withValues(alpha: 0.85)],
-        ),
-      ),
-      padding: EdgeInsets.fromLTRB(16, 40, 16, MediaQuery.of(context).padding.bottom + 14),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        if (details.isNotEmpty)
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            for (final d in details)
-              Pill(
-                '${zoneNames[d.zone]}: ${fitLabels[d.label]!.toLowerCase()} ${d.ease >= 0 ? '+' : ''}${d.ease.round()} cm',
-                color: switch (d.label) { 'ideal' => AppColors.chain, 'ajustada' => Colors.orange, _ => AppColors.ar },
-                filled: true,
-              ),
-            if (measures?.length != null) Pill('largo ${measures!.length!.round()} cm', color: Colors.white24, filled: true),
-          ]),
-        const SizedBox(height: 10),
-        Row(children: [
-          const Text('Talla', style: TextStyle(color: Colors.white70)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(children: [
-                for (final s in p.sizes)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      label: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Text(s),
-                        if (rec?.size == s) ...[const SizedBox(width: 3), const Icon(Icons.auto_awesome, size: 13, color: AppColors.ai)],
-                      ]),
-                      selected: _size == s,
-                      onSelected: (_) => setState(() => _size = s),
-                    ),
-                  ),
-              ]),
-            ),
-          ),
-        ]),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(
-            child: OutlinedButton(
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white54)),
-              onPressed: () => Navigator.pop(context, _size),
-              child: Text('Elegir talla ${_size ?? ''}'),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: BusyButton(
-              label: 'Al carrito',
-              icon: Icons.add_shopping_cart,
-              color: AppColors.accent,
-              onPressed: _size == null || (p.stock[_size] ?? 0) == 0
-                  ? null
-                  : () async {
-                      final state = context.read<AppState>();
-                      await Api.addToCart(p.id, _size!);
-                      await state.refreshCart();
-                      if (mounted) showInfo(context, 'Talla $_size agregada al carrito');
-                    },
-            ),
-          ),
-        ]),
-        const SizedBox(height: 6),
-        Text(
-          body.estimated
-              ? 'Medidas estimadas por altura y peso · pellizca para ajustar, doble toque para reiniciar'
-              : 'Ajustado a tus medidas · pellizca para ajustar, doble toque para reiniciar',
-          style: const TextStyle(color: Colors.white54, fontSize: 11),
-        ),
-      ]),
+    return TryOnBottomPanel(
+      product: p,
+      body: body,
+      size: _size,
+      onSize: (s) => setState(() => _size = s),
+      timer: _timer,
+      capturing: _capturing,
+      onShoot: _capture,
+      showShutter: _error == null && (_controller?.value.isInitialized == true || _testImage != null),
+      footnote: body.estimated
+          ? 'Medidas estimadas por altura y peso · pellizca para ajustar, doble toque para reiniciar'
+          : 'Ajustado a tus medidas · pellizca para ajustar, doble toque para reiniciar',
     );
   }
+
 }
 
 class _GarmentPainter extends CustomPainter {
@@ -735,4 +747,56 @@ class _GarmentPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _GarmentPainter old) => true;
+}
+
+/// Copia de un cuadro NV21 de la cámara.
+class _RawFrame {
+  const _RawFrame(this.bytes, this.width, this.height, this.stride, this.rotation);
+  final Uint8List bytes;
+  final int width, height, stride, rotation;
+}
+
+/// NV21 → RGBA enderezado con la misma rotación y espejo que se aplica a los
+/// puntos de ML Kit (ver _toCanvas), para que la prenda calce sobre la foto.
+({Uint8List pixels, int width, int height}) _nv21ToUprightRgba(({_RawFrame frame, bool mirror}) a) {
+  final f = a.frame, w = f.width, h = f.height, st = f.stride, src = f.bytes;
+  final rotated = f.rotation == 90 || f.rotation == 270;
+  final ow = rotated ? h : w, oh = rotated ? w : h;
+  final flip = f.rotation == 270 || (!rotated && a.mirror);
+  final out = Uint8List(ow * oh * 4);
+  final uvBase = st * h;
+  for (var y = 0; y < h; y++) {
+    final uvRow = uvBase + (y >> 1) * st;
+    for (var x = 0; x < w; x++) {
+      final yy = src[y * st + x];
+      final uvi = uvRow + (x & ~1);
+      final v = src[uvi] - 128, u = src[uvi + 1] - 128;
+      var r = (yy + 1.402 * v).round(), g = (yy - 0.344136 * u - 0.714136 * v).round(), b = (yy + 1.772 * u).round();
+      r = r < 0 ? 0 : (r > 255 ? 255 : r);
+      g = g < 0 ? 0 : (g > 255 ? 255 : g);
+      b = b < 0 ? 0 : (b > 255 ? 255 : b);
+      int ox, oy;
+      switch (f.rotation) {
+        case 90:
+          ox = h - 1 - y;
+          oy = x;
+        case 270:
+          ox = y;
+          oy = w - 1 - x;
+        case 180:
+          ox = w - 1 - x;
+          oy = h - 1 - y;
+        default:
+          ox = x;
+          oy = y;
+      }
+      if (flip) ox = ow - 1 - ox;
+      final o = (oy * ow + ox) * 4;
+      out[o] = r;
+      out[o + 1] = g;
+      out[o + 2] = b;
+      out[o + 3] = 255;
+    }
+  }
+  return (pixels: out, width: ow, height: oh);
 }

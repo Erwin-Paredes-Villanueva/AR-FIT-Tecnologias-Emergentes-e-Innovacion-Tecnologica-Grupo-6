@@ -1,6 +1,6 @@
 // Conexión con el contrato ARFitTrace desplegado en Polygon Amoy (testnet pública real).
 import { Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toUtf8Bytes, sha256 } from 'npm:ethers@6';
-import { ARFIT_ABI } from './abi.ts';
+import { ARFIT_ABI, ARFIT_UNITS_ABI } from './abi.ts';
 
 export const EXPLORER = 'https://amoy.polygonscan.com';
 
@@ -16,14 +16,31 @@ export const STATUS_CODE: Record<string, number> = {
 };
 
 let _contract: Contract | null = null;
+let _units: Contract | null = null;
+let _wallet: Wallet | null = null;
+
+/** Wallet relayer: paga el gas y firma las etiquetas de AR-FIT (emisor de confianza). */
+export function relayer(): Wallet {
+  if (_wallet) return _wallet;
+  const rpc = Deno.env.get('AMOY_RPC_URL') ?? 'https://polygon-amoy-bor-rpc.publicnode.com';
+  const provider = new JsonRpcProvider(rpc, 80002, { staticNetwork: true });
+  _wallet = new Wallet(Deno.env.get('RELAYER_PRIVATE_KEY')!, provider);
+  return _wallet;
+}
 
 export function contract(): Contract {
   if (_contract) return _contract;
-  const rpc = Deno.env.get('AMOY_RPC_URL') ?? 'https://polygon-amoy-bor-rpc.publicnode.com';
-  const provider = new JsonRpcProvider(rpc, 80002, { staticNetwork: true });
-  const wallet = new Wallet(Deno.env.get('RELAYER_PRIVATE_KEY')!, provider);
-  _contract = new Contract(Deno.env.get('CONTRACT_ADDRESS')!, ARFIT_ABI, wallet);
+  _contract = new Contract(Deno.env.get('CONTRACT_ADDRESS')!, ARFIT_ABI, relayer());
   return _contract;
+}
+
+/** Contrato ARFitUnits: unidades físicas (serie + código de barras) y su activación. */
+export function unitsContract(): Contract {
+  if (_units) return _units;
+  const address = Deno.env.get('UNITS_CONTRACT_ADDRESS');
+  if (!address) throw new Error('Falta UNITS_CONTRACT_ADDRESS en los secretos de la función');
+  _units = new Contract(address, ARFIT_UNITS_ABI, relayer());
+  return _units;
 }
 
 /** UUID de Supabase → bytes32 on-chain (no expone el UUID ni datos personales). */
@@ -45,8 +62,8 @@ export function productDataHash(p: {
 export async function sendTx(
   method: string,
   args: unknown[],
+  c: Contract = contract(),
 ): Promise<{ hash: string; blockNumber: number }> {
-  const c = contract();
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       // Amoy: comisión base ~0, se paga solo la propina mínima de Polygon

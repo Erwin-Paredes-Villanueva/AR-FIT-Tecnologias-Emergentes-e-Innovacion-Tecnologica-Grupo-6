@@ -69,13 +69,13 @@ class _AuthenticityCardState extends State<AuthenticityCard> {
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(
                       ok
-                          ? 'Prenda auténtica verificada'
+                          ? 'Modelo verificado en blockchain'
                           : intact
-                              ? 'Registrada, pendiente de verificación'
+                              ? 'Modelo registrado, pendiente de verificación'
                               : '¡La ficha no coincide con el registro!',
                       style: TextStyle(fontWeight: FontWeight.w700, color: color),
                     ),
-                    const Text('Datos leídos directamente de Polygon Amoy', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+                    const Text('Procedencia del modelo, leída de Polygon Amoy', style: TextStyle(fontSize: 12, color: AppColors.muted)),
                   ]),
                 ),
               ]),

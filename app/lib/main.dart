@@ -46,7 +46,7 @@ class RootGate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    if (!state.signedIn) return const LoginScreen();
+    if (!state.signedIn || state.signingOut) return const LoginScreen();
     final profile = state.profile;
     if (profile == null) {
       if (state.loadingProfile) return const Scaffold(body: Center(child: CircularProgressIndicator()));

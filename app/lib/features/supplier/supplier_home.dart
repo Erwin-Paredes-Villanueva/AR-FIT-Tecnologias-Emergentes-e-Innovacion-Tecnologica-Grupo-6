@@ -36,6 +36,64 @@ class _SupplierHomeState extends State<SupplierHome> {
     if (saved == true) _load();
   }
 
+  Future<void> _toggleVisible(Product p) async {
+    try {
+      await Api.setProductActive(p.id, !p.active);
+      if (!mounted) return;
+      showInfo(context, p.active ? '"${p.name}" ya no aparece en el catálogo' : '"${p.name}" vuelve a aparecer en el catálogo');
+      await _load();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
+  Future<void> _delete(Product p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(Icons.delete_outline, color: Colors.red.shade700, size: 36),
+        title: const Text('¿Eliminar prenda?'),
+        content: Text(
+          'Se borrará "${p.name}" del catálogo, junto con sus etiquetas y su presencia en carritos y favoritos. '
+          'Esta acción no se puede deshacer.\n\n'
+          'El registro de procedencia en blockchain es inmutable y se conserva.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await Api.deleteProduct(p.id);
+      if (!mounted) return;
+      showInfo(context, '"${p.name}" fue eliminada');
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      // Tiene pedidos: se ofrece ocultarla en su lugar
+      final hide = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('No se puede eliminar'),
+          content: Text(e.message),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cerrar')),
+            if (p.active) FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Ocultarla')),
+          ],
+        ),
+      );
+      if (hide == true) await _toggleVisible(p);
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final profile = context.watch<AppState>().profile!;
@@ -96,7 +154,31 @@ class _SupplierHomeState extends State<SupplierHome> {
                     ]),
                   ),
                   onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ProductDetail(product: p))),
-                  trailing: IconButton(icon: const Icon(Icons.edit_outlined), onPressed: () => _edit(p)),
+                  trailing: PopupMenuButton<String>(
+                    tooltip: 'Opciones',
+                    onSelected: (v) => switch (v) {
+                      'edit' => _edit(p),
+                      'toggle' => _toggleVisible(p),
+                      _ => _delete(p),
+                    },
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
+                      PopupMenuItem(
+                        value: 'toggle',
+                        child: ListTile(
+                          leading: Icon(p.active ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                          title: Text(p.active ? 'Ocultar del catálogo' : 'Mostrar en el catálogo'),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: ListTile(
+                          leading: Icon(Icons.delete_outline, color: Colors.red.shade700),
+                          title: Text('Eliminar', style: TextStyle(color: Colors.red.shade700)),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
         ]),

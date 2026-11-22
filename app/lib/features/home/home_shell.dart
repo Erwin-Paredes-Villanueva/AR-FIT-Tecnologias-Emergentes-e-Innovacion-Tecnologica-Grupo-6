@@ -57,7 +57,8 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    final role = context.select<AppState, String>((s) => s.profile!.role);
+    final role = context.select<AppState, String?>((s) => s.profile?.role);
+    if (role == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     final tabs = _tabs(role);
     if (_index >= tabs.length) _index = 0;
     return Scaffold(

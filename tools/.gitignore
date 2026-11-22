@@ -1,3 +1,4 @@
 node_modules/
 .env
 demo-accounts.local.json
+labels/out/

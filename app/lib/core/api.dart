@@ -184,8 +184,38 @@ class Api {
     return Product.fromJson(row);
   }
 
+  /// Ocultar (no aparece en el catálogo) o volver a mostrar una prenda.
+  static Future<void> setProductActive(String id, bool active) =>
+      sb.from('products').update({'active': active}).eq('id', id);
+
+  /// Elimina la prenda. Si ya tiene pedidos, la base de datos lo impide
+  /// (se conserva el historial de compras) y se lanza un aviso.
+  static Future<void> deleteProduct(String id) async {
+    try {
+      await sb.from('products').delete().eq('id', id);
+    } on PostgrestException catch (e) {
+      if (e.code == '23503') {
+        throw ApiException('Esta prenda ya tiene pedidos, por eso no se puede eliminar. Puedes ocultarla del catálogo.');
+      }
+      rethrow;
+    }
+  }
+
   static Future<Map<String, dynamic>> registerOnChain(String productId) =>
       fn('chain-product', {'action': 'register', 'product_id': productId});
+
+  // ------------------------------------------- etiquetas anti-fraude (unidades)
+  static Future<List<ProductUnit>> productUnits(String productId) async {
+    final rows = await sb.from('product_units').select().eq('product_id', productId).order('created_at', ascending: false);
+    return rows.map(ProductUnit.fromJson).toList();
+  }
+
+  /// Emite etiquetas (serie firmada + código de barras) y las registra en ARFitUnits.
+  static Future<Map<String, dynamic>> issueUnits(String productId, String size, int count) =>
+      fn('units', {'action': 'issue', 'product_id': productId, 'size': size, 'count': count});
+
+  /// Activa una unidad a nombre del comprador que la recibió.
+  static Future<Map<String, dynamic>> claimUnit(String serial) => fn('units', {'action': 'claim', 'serial': serial});
 
   // ------------------------------------------------------------------- admin
   static Future<List<Profile>> allProfiles() async {

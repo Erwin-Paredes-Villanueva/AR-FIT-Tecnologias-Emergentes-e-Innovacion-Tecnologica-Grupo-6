@@ -1,13 +1,17 @@
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/api.dart';
 import '../../core/background_removal.dart';
 import '../../core/labels.dart';
+import '../../core/unit_label.dart';
 import '../../core/models.dart';
 import '../../theme.dart';
+import '../../widgets/barcode_scanner_page.dart';
 import '../../widgets/common.dart';
 
 /// Tablas de tallas por defecto (cm) según la categoría.
@@ -73,6 +77,60 @@ class _ProductFormState extends State<ProductForm> {
   // tabla de tallas editable: talla → zona → controlador
   late Map<String, Map<String, TextEditingController>> _chart = _chartControllers();
 
+  // código de barras EAN-13 por talla (opcional: si falta, AR-FIT asigna uno)
+  final Map<String, TextEditingController> _gtins = {};
+  TextEditingController _gtinCtl(String size) =>
+      _gtins.putIfAbsent(size, () => TextEditingController(text: p?.gtins[size] ?? ''));
+
+  /// Lee el código de barras de la etiqueta de la prenda con la cámara.
+  Future<void> _scanGtin(String size) async {
+    final code = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BarcodeScannerPage(
+          title: 'Código de barras · talla $size',
+          hint: 'Apunta al código de barras de la etiqueta de la prenda (talla $size)',
+          formats: const [BarcodeFormat.ean13, BarcodeFormat.upcA],
+          allowTyping: true,
+        ),
+      ),
+    );
+    if (code == null || !mounted) return;
+    // UPC-A (12 dígitos) es un EAN-13 con un 0 delante
+    final digits = code.replaceAll(RegExp(r'\D'), '');
+    final ean = digits.length == 12 ? '0$digits' : digits;
+    if (!isValidEan13(ean)) return showError(context, 'El código leído ($code) no es un EAN-13 válido');
+    setState(() => _gtinCtl(size).text = ean);
+    showInfo(context, 'Código de la talla $size: $ean');
+  }
+
+  /// Código interno EAN-13 (prefijo 20–29 de GS1, de uso interno de la tienda),
+  /// distinto de los ya puestos en las demás tallas.
+  String _newGtin() {
+    final rnd = Random.secure();
+    final used = {for (final c in _gtins.values) c.text.trim()};
+    while (true) {
+      final first12 = '2${rnd.nextInt(10)}${List.generate(10, (_) => rnd.nextInt(10)).join()}';
+      final code = '$first12${ean13CheckDigit(first12)}';
+      if (!used.contains(code)) return code;
+    }
+  }
+
+  void _generateGtin(String size) => setState(() => _gtinCtl(size).text = _newGtin());
+
+  void _generateMissing() {
+    var n = 0;
+    setState(() {
+      for (final s in _chart.keys) {
+        if (_gtinCtl(s).text.trim().isEmpty) {
+          _gtinCtl(s).text = _newGtin();
+          n++;
+        }
+      }
+    });
+    showInfo(context, n == 0 ? 'Todas las tallas ya tienen código' : 'Se generaron $n códigos');
+  }
+
   Uint8List? _imageBytes;
   bool _removeBg = true;
   bool _processing = false;
@@ -135,6 +193,10 @@ class _ProductFormState extends State<ProductForm> {
       'tryon_image_url': imageUrl,
       'tryon_type': categoryTryon[_category],
       'tryon_lens_id': _lensId.text.trim().isEmpty ? null : _lensId.text.trim(),
+      'gtins': {
+        for (final s in _chart.keys)
+          if (_gtinCtl(s).text.trim().isNotEmpty) s: _gtinCtl(s).text.trim(),
+      },
       if (_imageBytes != null) ...{'tryon_anchor': null, 'tryon_rig': null, 'tryon_back_url': null}, // se estiman del contorno
       'active': _active,
     };
@@ -304,6 +366,45 @@ class _ProductFormState extends State<ProductForm> {
           ),
           _label('Tabla de tallas (cm) y stock'),
           _chartEditor(),
+          _label('Código de barras por talla (EAN-13, opcional)'),
+          const Text(
+            'Escanea el código de la etiqueta de tu prenda con la cámara, escríbelo o genera uno automáticamente. '
+            'Si lo dejas vacío, AR-FIT asigna uno al emitir las etiquetas anti-fraude.',
+            style: TextStyle(color: AppColors.muted, fontSize: 12.5),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: _generateMissing,
+              icon: const Icon(Icons.auto_fix_high, size: 18),
+              label: const Text('Generar los que faltan'),
+            ),
+          ),
+          for (final s in _chart.keys)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: TextFormField(
+                controller: _gtinCtl(s),
+                keyboardType: TextInputType.number,
+                maxLength: 13,
+                decoration: InputDecoration(
+                  labelText: 'Talla $s',
+                  counterText: '',
+                  prefixIcon: const Icon(Icons.barcode_reader),
+                  suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [
+                    IconButton(tooltip: 'Escanear con la cámara', icon: const Icon(Icons.qr_code_scanner), onPressed: () => _scanGtin(s)),
+                    IconButton(tooltip: 'Generar automáticamente', icon: const Icon(Icons.auto_fix_high), onPressed: () => _generateGtin(s)),
+                  ]),
+                ),
+                validator: (v) {
+                  final code = v?.trim() ?? '';
+                  if (code.isEmpty) return null;
+                  if (!isValidEan13(code)) return 'EAN-13 no válido (revisa el dígito de control)';
+                  final dup = _chart.keys.any((o) => o != s && _gtinCtl(o).text.trim() == code);
+                  return dup ? 'Este código ya está en otra talla' : null;
+                },
+              ),
+            ),
           const SizedBox(height: 8),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,

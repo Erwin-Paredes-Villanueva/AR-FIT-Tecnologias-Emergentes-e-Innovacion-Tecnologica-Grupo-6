@@ -1,8 +1,8 @@
-- !<AssetImportMetadata/a3d6636e-54ff-4245-8e4d-571e77b39805>
+- !<AssetImportMetadata/282bfb3a-6e99-4d45-b603-48ed76aff993>
   ImportedAssetIds:
-    Material: !<reference> 624a4954-657d-4d63-9b27-f8965b4d6ba3
+    Material: !<reference> 026f85cd-e148-4e04-9e99-92fe35d1fbff
   ImporterName: MaterialImporter
-  PrimaryAsset: !<reference> 624a4954-657d-4d63-9b27-f8965b4d6ba3
+  PrimaryAsset: !<reference> 026f85cd-e148-4e04-9e99-92fe35d1fbff
   PackageType: NotAPackage
   LegacyPackagePolicy: ~
   ExtraData:

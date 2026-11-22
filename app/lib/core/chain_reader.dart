@@ -58,6 +58,16 @@ class ChainOrder {
   ChainOrder(this.exists, this.buyerRef, this.supplierRef, this.status, this.createdAt, this.productCount, this.events);
 }
 
+/// Unidad física registrada en ARFitUnits.
+class ChainUnit {
+  final bool exists;
+  final String productRef, size, gtin, ownerRef;
+  final DateTime issuedAt;
+  final DateTime? claimedAt;
+  ChainUnit(this.exists, this.productRef, this.size, this.gtin, this.issuedAt, this.ownerRef, this.claimedAt);
+  bool get claimed => claimedAt != null;
+}
+
 class _Abi {
   final Uint8List data;
   _Abi(this.data);
@@ -66,6 +76,7 @@ class _Abi {
   int integer(int i) => uint(i).toInt();
   bool boolean(int i) => uint(i) != BigInt.zero;
   String bytes32(int i) => '0x${_hex(word(i))}';
+  String bytes8Ascii(int i) => utf8.decode(word(i).sublist(0, 8).where((b) => b != 0).toList());
   String string(int i) {
     final offset = integer(i);
     final len = BigInt.parse(_hex(data.sublist(offset, offset + 32)), radix: 16).toInt();
@@ -97,10 +108,10 @@ class ChainReader {
     return body['result'];
   }
 
-  Future<_Abi> _call(String signature, List<String> encodedArgs) async {
+  Future<_Abi> _call(String signature, List<String> encodedArgs, {String? to}) async {
     final data = '0x${_selector(signature)}${encodedArgs.join()}';
     final result = await _rpc('eth_call', [
-      {'to': _contract, 'data': data},
+      {'to': to ?? _contract, 'data': data},
       'latest',
     ]);
     return _Abi(_unhex(result as String));
@@ -119,6 +130,21 @@ class ChainReader {
       r.bytes32(5),
       DateTime.fromMillisecondsSinceEpoch(r.integer(6) * 1000),
       r.boolean(7),
+    );
+  }
+
+  /// Lee una unidad de ARFitUnits por su clave (keccak256 de la serie).
+  Future<ChainUnit> getUnit(String unitId) async {
+    final r = await _call('getUnit(bytes32)', [_b32(unitId)], to: AppConfig.unitsContractAddress);
+    final claimed = r.integer(6);
+    return ChainUnit(
+      r.boolean(0),
+      r.bytes32(1),
+      r.bytes8Ascii(2),
+      r.uint(3).toString(),
+      DateTime.fromMillisecondsSinceEpoch(r.integer(4) * 1000),
+      r.bytes32(5),
+      claimed == 0 ? null : DateTime.fromMillisecondsSinceEpoch(claimed * 1000),
     );
   }
 

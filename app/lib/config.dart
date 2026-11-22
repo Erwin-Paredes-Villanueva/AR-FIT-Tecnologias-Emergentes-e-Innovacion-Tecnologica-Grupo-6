@@ -10,4 +10,9 @@ class AppConfig {
   static const amoyRpcUrl = 'https://polygon-amoy-bor-rpc.publicnode.com';
   static const contractAddress = '0x04191b41193a7B7C5e3765949faB43fD0cc7cb71';
   static const explorerUrl = 'https://amoy.polygonscan.com';
+
+  // ARFitUnits: unidades físicas (serie + código de barras) y su activación
+  static const unitsContractAddress = '0x69db2e114fEFe1089153C5256C43c831443669D3';
+  // Wallet de AR-FIT que firma las etiquetas QR (emisor de confianza)
+  static const labelIssuer = '0xc74365821590d864622223b912cE2983C1079d4A';
 }

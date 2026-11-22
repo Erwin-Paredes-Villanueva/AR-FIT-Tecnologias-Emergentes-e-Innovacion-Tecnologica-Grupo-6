@@ -34,3 +34,7 @@ lenses/*/.virtual-scene.json
 lenses/*/AGENTS.md
 lenses/*/CLAUDE.md
 lenses/*/jsconfig.json
+lenses_backup_v1/
+*.pdf
+tools/labels/out/
+lenses/*/.gitattributes

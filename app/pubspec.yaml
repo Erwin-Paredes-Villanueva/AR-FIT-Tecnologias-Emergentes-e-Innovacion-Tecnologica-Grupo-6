@@ -50,6 +50,9 @@ dependencies:
   image: ^4.10.1
   flutter_localizations:
     sdk: flutter
+  gal: ^3.0.1
+  share_plus: ^13.3.1
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:
