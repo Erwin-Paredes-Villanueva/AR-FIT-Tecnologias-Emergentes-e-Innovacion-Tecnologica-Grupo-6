@@ -117,3 +117,5 @@ Las fotos que suben los proveedores no traen rig: se les quita el fondo y se def
 **Límites del 2D**: no hay simulación de tela ni oclusión; para eso está el probador 3D con Snap Camera Kit (Body Mesh, oclusor de cabeza y simulación de tela en el vestido). Funciona mejor a ~2 m, con buena luz y el cuerpo completo en cuadro.
 
 **Pruebas visuales**: `RIG_OUT=/tmp flutter test test/rig_render_test.dart` dibuja todas las prendas sobre esqueletos sintéticos en 8 poses. En el dispositivo, `flutter build apk --dart-define=ARFIT_TEST_IMAGE=synthetic` (o la ruta de una foto) reemplaza la cámara por un esqueleto o una foto fija.
+
+
