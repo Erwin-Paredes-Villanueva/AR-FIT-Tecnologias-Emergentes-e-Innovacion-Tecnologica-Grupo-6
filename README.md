@@ -119,3 +119,5 @@ Las fotos que suben los proveedores no traen rig: se les quita el fondo y se def
 **Pruebas visuales**: `RIG_OUT=/tmp flutter test test/rig_render_test.dart` dibuja todas las prendas sobre esqueletos sintéticos en 8 poses. En el dispositivo, `flutter build apk --dart-define=ARFIT_TEST_IMAGE=synthetic` (o la ruta de una foto) reemplaza la cámara por un esqueleto o una foto fija.
 
 
+
+
